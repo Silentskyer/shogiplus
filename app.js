@@ -59,6 +59,7 @@ const state = {
   selectedDropType: null,
   legalDrops: [],
   gameOver: false,
+  positionCounts: new Map(),
 };
 
 const boardEl = document.getElementById("board");
@@ -651,6 +652,38 @@ function updateStatus() {
   }
 }
 
+function serializePosition() {
+  const rows = state.board.map((row) =>
+    row
+      .map((piece) => {
+        if (!piece) return "..";
+        const promo = piece.promoted ? "+" : "";
+        return `${piece.owner}${piece.type}${promo}`;
+      })
+      .join("")
+  );
+  const handBlack = HAND_ORDER.map((type) => state.hands[PLAYER_BLACK][type]).join(",");
+  const handWhite = HAND_ORDER.map((type) => state.hands[PLAYER_WHITE][type]).join(",");
+  return `${state.current}|${rows.join("/")}|${handBlack}|${handWhite}`;
+}
+
+function recordPosition() {
+  const key = serializePosition();
+  const count = state.positionCounts.get(key) || 0;
+  state.positionCounts.set(key, count + 1);
+  return count + 1;
+}
+
+function checkRepetition() {
+  const count = recordPosition();
+  if (count >= 4) {
+    state.gameOver = true;
+    statusEl.textContent = "千日手（和局）";
+    return true;
+  }
+  return false;
+}
+
 function renderHands() {
   const renderHand = (owner, container) => {
     container.innerHTML = "";
@@ -759,6 +792,10 @@ function onSquareClick(event) {
       state.hands = next.hands;
       clearDropSelection();
       swapTurn();
+      if (checkRepetition()) {
+        renderAll();
+        return;
+      }
       updateStatus();
       renderAll();
       return;
@@ -780,6 +817,10 @@ function onSquareClick(event) {
       state.hands = next.hands;
       clearSelection();
       swapTurn();
+      if (checkRepetition()) {
+        renderAll();
+        return;
+      }
       updateStatus();
       renderAll();
       return;
@@ -827,6 +868,8 @@ function renderAll() {
 function init() {
   state.board = setupInitialBoard();
   state.hands = createEmptyHands();
+  state.positionCounts = new Map();
+  recordPosition();
   renderAll();
   updateStatus();
 }
