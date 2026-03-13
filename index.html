@@ -1,0 +1,44 @@
+﻿<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>將棋 - 本機對戰</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="app__header">
+        <h1>將棋</h1>
+        <div id="status" class="status">黑方回合</div>
+      </header>
+
+      <main class="app__main">
+        <section class="board-wrap">
+          <div id="board" class="board" aria-label="shogi board"></div>
+        </section>
+        <section class="side-panel">
+          <div class="panel">
+            <h2>操作說明</h2>
+            <p>點擊棋子可顯示合法走法，再點擊目的格完成移動。</p>
+            <p>進入升變區會詢問是否升變；必須升變時會自動升變。</p>
+            <p>持駒可在空格打入，需符合二步與打步詰規則。</p>
+          </div>
+          <div class="panel">
+            <h2>規則提示</h2>
+            <p>本遊戲遵循標準將棋規則（升變、打入、二步、打步詰、王手與將死）。</p>
+          </div>
+          <div class="panel">
+            <h2>持駒</h2>
+            <div class="hands">
+              <div id="hand-black" class="hand"></div>
+              <div id="hand-white" class="hand"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
