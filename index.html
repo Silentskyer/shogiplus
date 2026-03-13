@@ -19,6 +19,14 @@
         </section>
         <section class="side-panel">
           <div class="panel">
+            <h2>連線對戰</h2>
+            <div class="room-row">
+              <input id="room-code" class="room-input" type="text" placeholder="房間碼" maxlength="8" />
+              <button id="connect-btn" class="room-btn" type="button">連線</button>
+            </div>
+            <div id="room-status" class="room-status">未連線</div>
+          </div>
+          <div class="panel">
             <h2>操作說明</h2>
             <p>點擊棋子可顯示合法走法，再點擊目的格完成移動。</p>
             <p>進入升變區會詢問是否升變；必須升變時會自動升變。</p>

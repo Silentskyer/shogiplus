@@ -163,6 +163,40 @@ body {
   line-height: 1.6;
 }
 
+.room-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.room-input {
+  border: 1px solid rgba(43, 29, 18, 0.35);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+  background: #fffaf2;
+}
+
+.room-btn {
+  border: 1px solid rgba(43, 29, 18, 0.45);
+  background: #f4e0c4;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.room-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.room-status {
+  font-size: 13px;
+  color: #5b4a38;
+}
+
 .hands {
   display: grid;
   gap: 12px;

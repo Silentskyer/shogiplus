@@ -60,12 +60,33 @@ const state = {
   legalDrops: [],
   gameOver: false,
   positionCounts: new Map(),
+  multiplayer: {
+    enabled: false,
+    role: null,
+    room: null,
+    ws: null,
+    pc: null,
+    dc: null,
+    ready: false,
+  },
 };
 
 const boardEl = document.getElementById("board");
 const statusEl = document.getElementById("status");
 const handBlackEl = document.getElementById("hand-black");
 const handWhiteEl = document.getElementById("hand-white");
+const roomInputEl = document.getElementById("room-code");
+const connectBtnEl = document.getElementById("connect-btn");
+const roomStatusEl = document.getElementById("room-status");
+
+const SIGNAL_HOST = location.hostname || "localhost";
+const SIGNAL_URL = `${location.protocol === "https:" ? "wss" : "ws"}://${SIGNAL_HOST}:8080`;
+
+function setRoomStatus(text) {
+  if (roomStatusEl) {
+    roomStatusEl.textContent = text;
+  }
+}
 
 function createEmptyBoard() {
   return Array.from({ length: BOARD_SIZE }, () =>
@@ -149,8 +170,8 @@ function setupInitialBoard() {
   ];
   bottomRow.forEach((type, x) => placePiece(board, x, 8, type, PLAYER_BLACK));
 
-  placePiece(board, 1, 7, PIECE.ROOK, PLAYER_BLACK);
-  placePiece(board, 7, 7, PIECE.BISHOP, PLAYER_BLACK);
+  placePiece(board, 1, 7, PIECE.BISHOP, PLAYER_BLACK);
+  placePiece(board, 7, 7, PIECE.ROOK, PLAYER_BLACK);
 
   for (let x = 0; x < BOARD_SIZE; x += 1) {
     placePiece(board, x, 6, PIECE.PAWN, PLAYER_BLACK);
@@ -781,6 +802,12 @@ function resolveMoveSelection(x, y) {
 
 function onSquareClick(event) {
   if (state.gameOver) return;
+  if (state.multiplayer.enabled && state.multiplayer.role) {
+    const isMyTurn =
+      (state.multiplayer.role === "black" && state.current === PLAYER_BLACK) ||
+      (state.multiplayer.role === "white" && state.current === PLAYER_WHITE);
+    if (!isMyTurn) return;
+  }
 
   const square = event.currentTarget;
   const x = Number(square.dataset.x);
@@ -794,6 +821,9 @@ function onSquareClick(event) {
       state.board = next.board;
       state.hands = next.hands;
       clearDropSelection();
+      if (state.multiplayer.enabled) {
+        sendAction({ type: "drop", x, y, pieceType: state.selectedDropType });
+      }
       swapTurn();
       if (checkRepetition()) {
         renderAll();
@@ -818,6 +848,16 @@ function onSquareClick(event) {
       const next = applyMove(state, state.selected.x, state.selected.y, chosen.x, chosen.y, chosen.promote);
       state.board = next.board;
       state.hands = next.hands;
+      if (state.multiplayer.enabled) {
+        sendAction({
+          type: "move",
+          fromX: state.selected.x,
+          fromY: state.selected.y,
+          toX: chosen.x,
+          toY: chosen.y,
+          promote: chosen.promote,
+        });
+      }
       clearSelection();
       swapTurn();
       if (checkRepetition()) {
@@ -842,6 +882,12 @@ function onSquareClick(event) {
 
 function onHandClick(event) {
   if (state.gameOver) return;
+  if (state.multiplayer.enabled && state.multiplayer.role) {
+    const isMyTurn =
+      (state.multiplayer.role === "black" && state.current === PLAYER_BLACK) ||
+      (state.multiplayer.role === "white" && state.current === PLAYER_WHITE);
+    if (!isMyTurn) return;
+  }
   const button = event.currentTarget;
   const type = button.dataset.type;
   const owner = button.dataset.owner;
@@ -878,5 +924,153 @@ function init() {
 }
 
 init();
+
+function sendAction(payload) {
+  const dc = state.multiplayer.dc;
+  if (dc && dc.readyState === "open") {
+    dc.send(JSON.stringify({ type: "action", payload }));
+  }
+}
+
+function applyRemoteAction(payload) {
+  if (payload.type === "move") {
+    const next = applyMove(state, payload.fromX, payload.fromY, payload.toX, payload.toY, payload.promote);
+    state.board = next.board;
+    state.hands = next.hands;
+  }
+  if (payload.type === "drop") {
+    const next = applyDrop(state, state.current, payload.pieceType, payload.x, payload.y);
+    state.board = next.board;
+    state.hands = next.hands;
+  }
+  clearSelection();
+  clearDropSelection();
+  swapTurn();
+  if (!checkRepetition()) {
+    updateStatus();
+  }
+  renderAll();
+}
+
+function setupDataChannel(channel) {
+  state.multiplayer.dc = channel;
+  channel.onopen = () => {
+    setRoomStatus(`連線成功（${state.multiplayer.role === "black" ? "黑方" : "白方"}）`);
+  };
+  channel.onmessage = (event) => {
+    let msg;
+    try {
+      msg = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (msg.type === "action") {
+      applyRemoteAction(msg.payload);
+    }
+  };
+  channel.onclose = () => {
+    setRoomStatus("連線中斷");
+  };
+}
+
+async function setupPeerConnection(isCaller) {
+  const pc = new RTCPeerConnection({
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  });
+  state.multiplayer.pc = pc;
+
+  pc.onicecandidate = (event) => {
+    if (event.candidate) {
+      state.multiplayer.ws.send(JSON.stringify({ type: "signal", data: { ice: event.candidate } }));
+    }
+  };
+
+  pc.ondatachannel = (event) => {
+    setupDataChannel(event.channel);
+  };
+
+  if (isCaller) {
+    const channel = pc.createDataChannel("shogi");
+    setupDataChannel(channel);
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    state.multiplayer.ws.send(JSON.stringify({ type: "signal", data: { sdp: pc.localDescription } }));
+  }
+}
+
+function attachSignaling(ws) {
+  ws.onmessage = async (event) => {
+    let msg;
+    try {
+      msg = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (msg.type === "role") {
+      state.multiplayer.role = msg.role;
+      state.multiplayer.room = msg.room;
+      setRoomStatus(`已加入房間 ${msg.room}，等待對手`);
+      return;
+    }
+    if (msg.type === "ready") {
+      const isCaller = state.multiplayer.role === "black";
+      await setupPeerConnection(isCaller);
+      return;
+    }
+    if (msg.type === "peer-left") {
+      setRoomStatus("對手離線");
+      return;
+    }
+    if (msg.type === "signal") {
+      const pc = state.multiplayer.pc;
+      if (!pc) return;
+      if (msg.data.sdp) {
+        await pc.setRemoteDescription(new RTCSessionDescription(msg.data.sdp));
+        if (msg.data.sdp.type === "offer") {
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          ws.send(JSON.stringify({ type: "signal", data: { sdp: pc.localDescription } }));
+        }
+      }
+      if (msg.data.ice) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(msg.data.ice));
+        } catch {
+          // Ignore invalid candidates
+        }
+      }
+    }
+    if (msg.type === "error" && msg.message === "room_full") {
+      setRoomStatus("房間已滿");
+      connectBtnEl.disabled = false;
+    }
+  };
+
+  ws.onclose = () => {
+    setRoomStatus("信令連線中斷");
+    connectBtnEl.disabled = false;
+  };
+}
+
+function connectRoom() {
+  const code = roomInputEl.value.trim().toUpperCase();
+  if (!code) {
+    setRoomStatus("請輸入房間碼");
+    return;
+  }
+  connectBtnEl.disabled = true;
+  state.multiplayer.enabled = true;
+  const ws = new WebSocket(SIGNAL_URL);
+  state.multiplayer.ws = ws;
+  ws.onopen = () => {
+    setRoomStatus("連線中...");
+    ws.send(JSON.stringify({ type: "join", room: code }));
+  };
+  attachSignaling(ws);
+}
+
+if (connectBtnEl) {
+  connectBtnEl.addEventListener("click", connectRoom);
+}
 
 
