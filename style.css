@@ -66,7 +66,7 @@ body {
   display: grid;
   grid-template-columns: repeat(9, 1fr);
   grid-template-rows: repeat(9, 1fr);
-  width: min(80vw, 520px);
+  width: min(92vw, 640px);
   aspect-ratio: 1 / 1;
   background:
     repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.08) 0 8px, rgba(0, 0, 0, 0.04) 8px 16px),
@@ -132,6 +132,11 @@ body {
   transform: rotate(180deg);
   color: #6a4526;
   background: linear-gradient(180deg, #fff9ef 0%, #f1dcc0 70%, #e2c29a 100%);
+}
+
+.piece.promoted {
+  color: #b21f1f;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 
 .side-panel {

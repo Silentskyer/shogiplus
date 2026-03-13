@@ -114,7 +114,7 @@ function placePiece(board, x, y, type, owner, promoted = false) {
 function setupInitialBoard() {
   const board = createEmptyBoard();
 
-  // White (top)
+  // Black (top)
   const topRow = [
     PIECE.LANCE,
     PIECE.KNIGHT,
@@ -126,16 +126,16 @@ function setupInitialBoard() {
     PIECE.KNIGHT,
     PIECE.LANCE,
   ];
-  topRow.forEach((type, x) => placePiece(board, x, 0, type, PLAYER_WHITE));
+  topRow.forEach((type, x) => placePiece(board, x, 0, type, PLAYER_BLACK));
 
-  placePiece(board, 1, 1, PIECE.BISHOP, PLAYER_WHITE);
-  placePiece(board, 7, 1, PIECE.ROOK, PLAYER_WHITE);
+  placePiece(board, 1, 1, PIECE.ROOK, PLAYER_BLACK);
+  placePiece(board, 7, 1, PIECE.BISHOP, PLAYER_BLACK);
 
   for (let x = 0; x < BOARD_SIZE; x += 1) {
-    placePiece(board, x, 2, PIECE.PAWN, PLAYER_WHITE);
+    placePiece(board, x, 2, PIECE.PAWN, PLAYER_BLACK);
   }
 
-  // Black (bottom)
+  // White (bottom)
   const bottomRow = [
     PIECE.LANCE,
     PIECE.KNIGHT,
@@ -147,13 +147,13 @@ function setupInitialBoard() {
     PIECE.KNIGHT,
     PIECE.LANCE,
   ];
-  bottomRow.forEach((type, x) => placePiece(board, x, 8, type, PLAYER_BLACK));
+  bottomRow.forEach((type, x) => placePiece(board, x, 8, type, PLAYER_WHITE));
 
-  placePiece(board, 1, 7, PIECE.ROOK, PLAYER_BLACK);
-  placePiece(board, 7, 7, PIECE.BISHOP, PLAYER_BLACK);
+  placePiece(board, 1, 7, PIECE.BISHOP, PLAYER_WHITE);
+  placePiece(board, 7, 7, PIECE.ROOK, PLAYER_WHITE);
 
   for (let x = 0; x < BOARD_SIZE; x += 1) {
-    placePiece(board, x, 6, PIECE.PAWN, PLAYER_BLACK);
+    placePiece(board, x, 6, PIECE.PAWN, PLAYER_WHITE);
   }
 
   return board;
@@ -734,6 +734,9 @@ function renderBoard() {
       if (piece) {
         const pieceEl = document.createElement("div");
         pieceEl.className = `piece ${piece.owner === PLAYER_WHITE ? "white" : "black"}`;
+        if (piece.promoted) {
+          pieceEl.classList.add("promoted");
+        }
         const labelKey = piece.promoted ? `+${piece.type}` : piece.type;
         pieceEl.textContent = PIECE_LABEL[labelKey];
         square.appendChild(pieceEl);
