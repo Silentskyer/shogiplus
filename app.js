@@ -64,10 +64,11 @@ const state = {
     enabled: false,
     role: null,
     room: null,
-    ws: null,
+    channel: null,
     pc: null,
     dc: null,
     ready: false,
+    clientId: null,
   },
 };
 
@@ -79,13 +80,54 @@ const roomInputEl = document.getElementById("room-code");
 const connectBtnEl = document.getElementById("connect-btn");
 const roomStatusEl = document.getElementById("room-status");
 
-const SIGNAL_HOST = location.hostname || "localhost";
-const SIGNAL_URL = `${location.protocol === "https:" ? "wss" : "ws"}://${SIGNAL_HOST}:8080`;
+let SUPABASE_URL = window.SUPABASE_URL || "";
+let SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "";
+let supabaseClient = null;
 
 function setRoomStatus(text) {
   if (roomStatusEl) {
     roomStatusEl.textContent = text;
   }
+}
+
+function setSupabaseConfig(url, key) {
+  SUPABASE_URL = url || "";
+  SUPABASE_ANON_KEY = key || "";
+  supabaseClient = null;
+}
+
+async function loadSupabaseConfig() {
+  if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+    return true;
+  }
+  try {
+    const response = await fetch("/api/config", { cache: "no-store" });
+    if (!response.ok) {
+      return false;
+    }
+    const data = await response.json();
+    if (data && data.supabaseUrl && data.supabaseAnonKey) {
+      setSupabaseConfig(data.supabaseUrl, data.supabaseAnonKey);
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function getSupabaseClient() {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !window.supabase) {
+    return null;
+  }
+  if (!supabaseClient) {
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+  return supabaseClient;
+}
+
+function generateClientId() {
+  return `client-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 function createEmptyBoard() {
@@ -981,7 +1023,7 @@ async function setupPeerConnection(isCaller) {
 
   pc.onicecandidate = (event) => {
     if (event.candidate) {
-      state.multiplayer.ws.send(JSON.stringify({ type: "signal", data: { ice: event.candidate } }));
+      sendSignal({ ice: event.candidate });
     }
   };
 
@@ -994,83 +1036,144 @@ async function setupPeerConnection(isCaller) {
     setupDataChannel(channel);
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    state.multiplayer.ws.send(JSON.stringify({ type: "signal", data: { sdp: pc.localDescription } }));
+    sendSignal({ sdp: pc.localDescription });
   }
 }
 
-function attachSignaling(ws) {
-  ws.onmessage = async (event) => {
-    let msg;
-    try {
-      msg = JSON.parse(event.data);
-    } catch {
-      return;
-    }
-    if (msg.type === "role") {
-      state.multiplayer.role = msg.role;
-      state.multiplayer.room = msg.room;
-      setRoomStatus(`已加入房間 ${msg.room}，等待對手`);
-      return;
-    }
-    if (msg.type === "ready") {
-      const isCaller = state.multiplayer.role === "black";
-      await setupPeerConnection(isCaller);
-      return;
-    }
-    if (msg.type === "peer-left") {
-      setRoomStatus("對手離線");
-      return;
-    }
-    if (msg.type === "signal") {
-      const pc = state.multiplayer.pc;
-      if (!pc) return;
-      if (msg.data.sdp) {
-        await pc.setRemoteDescription(new RTCSessionDescription(msg.data.sdp));
-        if (msg.data.sdp.type === "offer") {
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          ws.send(JSON.stringify({ type: "signal", data: { sdp: pc.localDescription } }));
-        }
-      }
-      if (msg.data.ice) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(msg.data.ice));
-        } catch {
-          // Ignore invalid candidates
-        }
-      }
-    }
-    if (msg.type === "error" && msg.message === "room_full") {
-      setRoomStatus("房間已滿");
-      connectBtnEl.disabled = false;
-    }
-  };
-
-  ws.onclose = () => {
-    setRoomStatus("信令連線中斷");
-    connectBtnEl.disabled = false;
-  };
+function sendSignal(data) {
+  const channel = state.multiplayer.channel;
+  if (!channel) return;
+  channel.send({ type: "broadcast", event: "signal", payload: data });
 }
 
-function connectRoom() {
+function updateRoomPresence() {
+  const channel = state.multiplayer.channel;
+  if (!channel) return;
+  const presence = channel.presenceState();
+  const peers = [];
+  Object.values(presence).forEach((entries) => {
+    entries.forEach((entry) => peers.push(entry));
+  });
+  peers.sort((a, b) => a.joinedAt - b.joinedAt);
+
+  if (peers.length > 2) {
+    setRoomStatus("房間已滿");
+    connectBtnEl.disabled = false;
+    channel.unsubscribe();
+    state.multiplayer.channel = null;
+    state.multiplayer.enabled = false;
+    return;
+  }
+
+  if (peers.length === 0) return;
+
+  const me = peers.find((entry) => entry.clientId === state.multiplayer.clientId);
+  if (!me) return;
+
+  state.multiplayer.room = state.multiplayer.room || roomInputEl.value.trim().toUpperCase();
+  state.multiplayer.role = peers[0].clientId === state.multiplayer.clientId ? "black" : "white";
+
+  if (peers.length === 2 && !state.multiplayer.ready) {
+    state.multiplayer.ready = true;
+    setRoomStatus("對手已加入，建立連線...");
+    setupPeerConnection(state.multiplayer.role === "black");
+    return;
+  }
+
+  if (peers.length === 1) {
+    setRoomStatus(`已加入房間 ${state.multiplayer.room}，等待對手`);
+  }
+}
+
+function attachSignaling(channel) {
+  channel.on("presence", { event: "sync" }, () => {
+    updateRoomPresence();
+  });
+  channel.on("presence", { event: "join" }, () => {
+    updateRoomPresence();
+  });
+  channel.on("presence", { event: "leave" }, () => {
+    state.multiplayer.ready = false;
+    if (state.multiplayer.dc) {
+      state.multiplayer.dc.close();
+      state.multiplayer.dc = null;
+    }
+    if (state.multiplayer.pc) {
+      state.multiplayer.pc.close();
+      state.multiplayer.pc = null;
+    }
+    setRoomStatus("對手離線");
+  });
+  channel.on("broadcast", { event: "signal" }, async ({ payload }) => {
+    const pc = state.multiplayer.pc;
+    if (!pc) return;
+    if (payload.sdp) {
+      await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+      if (payload.sdp.type === "offer") {
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        sendSignal({ sdp: pc.localDescription });
+      }
+    }
+    if (payload.ice) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(payload.ice));
+      } catch {
+        // Ignore invalid candidates
+      }
+    }
+  });
+}
+
+async function connectRoom() {
   const code = roomInputEl.value.trim().toUpperCase();
   if (!code) {
     setRoomStatus("請輸入房間碼");
     return;
   }
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    await loadSupabaseConfig();
+  }
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    setRoomStatus("請先設定 Supabase 連線資訊");
+    return;
+  }
   connectBtnEl.disabled = true;
   state.multiplayer.enabled = true;
-  const ws = new WebSocket(SIGNAL_URL);
-  state.multiplayer.ws = ws;
-  ws.onopen = () => {
-    setRoomStatus("連線中...");
-    ws.send(JSON.stringify({ type: "join", room: code }));
-  };
-  attachSignaling(ws);
+  state.multiplayer.room = code;
+  state.multiplayer.clientId = generateClientId();
+  const channel = supabase.channel(`shogi-room-${code}`, {
+    config: {
+      presence: {
+        key: state.multiplayer.clientId,
+      },
+    },
+  });
+  state.multiplayer.channel = channel;
+  attachSignaling(channel);
+  channel.subscribe((status) => {
+    if (status === "SUBSCRIBED") {
+      setRoomStatus("連線中...");
+      channel.track({ clientId: state.multiplayer.clientId, joinedAt: Date.now() });
+    }
+    if (status === "CHANNEL_ERROR") {
+      setRoomStatus("信令連線失敗");
+      connectBtnEl.disabled = false;
+    }
+  });
 }
 
 if (connectBtnEl) {
-  connectBtnEl.addEventListener("click", connectRoom);
+  connectBtnEl.addEventListener("click", () => {
+    connectRoom();
+  });
 }
+
+window.addEventListener("beforeunload", () => {
+  if (state.multiplayer.channel) {
+    state.multiplayer.channel.unsubscribe();
+  }
+});
 
 

@@ -19,12 +19,16 @@
 1. 直接用瀏覽器開啟 `index.html`
 2. 或使用任意靜態伺服器啟動後開啟
 
-## 連線對戰啟動
-1. 安裝依賴：`npm install`
-2. 啟動信令伺服器：`npm start`
-3. 以瀏覽器開啟 `index.html`，輸入房間碼連線
+## 連線對戰（可部署於 Vercel）
+本版本改用 Supabase Realtime 作為信令服務，不需要自架 WebSocket 伺服器。
 
-預設信令伺服器使用 `ws://localhost:8080`，如用 HTTPS 部署會自動改用 `wss`。
+1. 建立 Supabase 專案
+2. 在 Vercel 專案設定環境變數：
+   - `SUPABASE_URL`
+   - `SUPABASE_ANON_KEY`
+3. 部署至 Vercel 後，使用者輸入房間碼即可連線
+
+伺服器端會透過 `api/config.js` 將環境變數提供給前端使用。
 
 ## 操作說明
 - 點擊棋子可顯示可走位置
