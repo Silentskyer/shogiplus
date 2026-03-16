@@ -1,14 +1,12 @@
 module.exports = (req, res) => {
-  const supabaseUrl = process.env.SUPABASE_URL || "";
-  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY || "";
+  const ablyKey = process.env.ABLY_KEY || "";
 
-  if (!supabaseUrl || !supabaseAnonKey) {
-    res.status(500).json({ error: "Missing Supabase env vars" });
+  if (!ablyKey) {
+    res.status(500).json({ error: "Missing Ably env var" });
     return;
   }
 
   res.status(200).json({
-    supabaseUrl,
-    supabaseAnonKey,
+    ablyKey,
   });
 };

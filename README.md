@@ -20,12 +20,11 @@
 2. 或使用任意靜態伺服器啟動後開啟
 
 ## 連線對戰（可部署於 Vercel）
-本版本改用 Supabase Realtime 作為信令服務，不需要自架 WebSocket 伺服器。
+本版本改用 Ably 作為信令服務，不需要自架 WebSocket 伺服器。
 
-1. 建立 Supabase 專案
+1. 建立 Ably 專案並取得 API Key
 2. 在 Vercel 專案設定環境變數：
-   - `SUPABASE_URL`
-   - `SUPABASE_ANON_KEY`
+   - `ABLY_KEY`
 3. 部署至 Vercel 後，使用者輸入房間碼即可連線
 
 伺服器端會透過 `api/config.js` 將環境變數提供給前端使用。

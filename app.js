@@ -80,9 +80,8 @@ const roomInputEl = document.getElementById("room-code");
 const connectBtnEl = document.getElementById("connect-btn");
 const roomStatusEl = document.getElementById("room-status");
 
-let SUPABASE_URL = window.SUPABASE_URL || "";
-let SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "";
-let supabaseClient = null;
+let ABLY_KEY = window.ABLY_KEY || "";
+let ablyClient = null;
 
 function setRoomStatus(text) {
   if (roomStatusEl) {
@@ -90,14 +89,13 @@ function setRoomStatus(text) {
   }
 }
 
-function setSupabaseConfig(url, key) {
-  SUPABASE_URL = url || "";
-  SUPABASE_ANON_KEY = key || "";
-  supabaseClient = null;
+function setAblyConfig(key) {
+  ABLY_KEY = key || "";
+  ablyClient = null;
 }
 
-async function loadSupabaseConfig() {
-  if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+async function loadAblyConfig() {
+  if (ABLY_KEY) {
     return true;
   }
   try {
@@ -106,8 +104,8 @@ async function loadSupabaseConfig() {
       return false;
     }
     const data = await response.json();
-    if (data && data.supabaseUrl && data.supabaseAnonKey) {
-      setSupabaseConfig(data.supabaseUrl, data.supabaseAnonKey);
+    if (data && data.ablyKey) {
+      setAblyConfig(data.ablyKey);
       return true;
     }
   } catch {
@@ -116,14 +114,17 @@ async function loadSupabaseConfig() {
   return false;
 }
 
-function getSupabaseClient() {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !window.supabase) {
+function getAblyClient() {
+  if (!ABLY_KEY || !window.Ably) {
     return null;
   }
-  if (!supabaseClient) {
-    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  if (!ablyClient) {
+    ablyClient = new window.Ably.Realtime({
+      key: ABLY_KEY,
+      clientId: state.multiplayer.clientId,
+    });
   }
-  return supabaseClient;
+  return ablyClient;
 }
 
 function generateClientId() {
@@ -1043,23 +1044,34 @@ async function setupPeerConnection(isCaller) {
 function sendSignal(data) {
   const channel = state.multiplayer.channel;
   if (!channel) return;
-  channel.send({ type: "broadcast", event: "signal", payload: data });
+  channel.publish("signal", data);
 }
 
-function updateRoomPresence() {
+async function updateRoomPresence() {
   const channel = state.multiplayer.channel;
   if (!channel) return;
-  const presence = channel.presenceState();
-  const peers = [];
-  Object.values(presence).forEach((entries) => {
-    entries.forEach((entry) => peers.push(entry));
+  let peers;
+  try {
+    peers = await channel.presence.get();
+  } catch {
+    return;
+  }
+  peers.sort((a, b) => {
+    const aJoined = (a.data && a.data.joinedAt) || 0;
+    const bJoined = (b.data && b.data.joinedAt) || 0;
+    if (aJoined !== bJoined) return aJoined - bJoined;
+    return a.clientId.localeCompare(b.clientId);
   });
-  peers.sort((a, b) => a.joinedAt - b.joinedAt);
 
   if (peers.length > 2) {
     setRoomStatus("房間已滿");
     connectBtnEl.disabled = false;
-    channel.unsubscribe();
+    channel.presence.leave();
+    channel.detach();
+    if (ablyClient) {
+      ablyClient.close();
+      ablyClient = null;
+    }
     state.multiplayer.channel = null;
     state.multiplayer.enabled = false;
     return;
@@ -1086,25 +1098,11 @@ function updateRoomPresence() {
 }
 
 function attachSignaling(channel) {
-  channel.on("presence", { event: "sync" }, () => {
+  channel.presence.subscribe(["enter", "leave", "update"], () => {
     updateRoomPresence();
   });
-  channel.on("presence", { event: "join" }, () => {
-    updateRoomPresence();
-  });
-  channel.on("presence", { event: "leave" }, () => {
-    state.multiplayer.ready = false;
-    if (state.multiplayer.dc) {
-      state.multiplayer.dc.close();
-      state.multiplayer.dc = null;
-    }
-    if (state.multiplayer.pc) {
-      state.multiplayer.pc.close();
-      state.multiplayer.pc = null;
-    }
-    setRoomStatus("對手離線");
-  });
-  channel.on("broadcast", { event: "signal" }, async ({ payload }) => {
+  channel.subscribe("signal", async (message) => {
+    const payload = message.data;
     const pc = state.multiplayer.pc;
     if (!pc) return;
     if (payload.sdp) {
@@ -1123,6 +1121,18 @@ function attachSignaling(channel) {
       }
     }
   });
+  channel.presence.subscribe("leave", () => {
+    state.multiplayer.ready = false;
+    if (state.multiplayer.dc) {
+      state.multiplayer.dc.close();
+      state.multiplayer.dc = null;
+    }
+    if (state.multiplayer.pc) {
+      state.multiplayer.pc.close();
+      state.multiplayer.pc = null;
+    }
+    setRoomStatus("對手離線");
+  });
 }
 
 async function connectRoom() {
@@ -1131,36 +1141,31 @@ async function connectRoom() {
     setRoomStatus("請輸入房間碼");
     return;
   }
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    await loadSupabaseConfig();
+  if (!ABLY_KEY) {
+    await loadAblyConfig();
   }
-  const supabase = getSupabaseClient();
-  if (!supabase) {
-    setRoomStatus("請先設定 Supabase 連線資訊");
+  state.multiplayer.clientId = generateClientId();
+  const ably = getAblyClient();
+  if (!ably) {
+    setRoomStatus("請先設定 Ably 連線資訊");
     return;
   }
   connectBtnEl.disabled = true;
   state.multiplayer.enabled = true;
   state.multiplayer.room = code;
-  state.multiplayer.clientId = generateClientId();
-  const channel = supabase.channel(`shogi-room-${code}`, {
-    config: {
-      presence: {
-        key: state.multiplayer.clientId,
-      },
-    },
-  });
+  const channel = ably.channels.get(`shogi-room-${code}`);
   state.multiplayer.channel = channel;
   attachSignaling(channel);
-  channel.subscribe((status) => {
-    if (status === "SUBSCRIBED") {
-      setRoomStatus("連線中...");
-      channel.track({ clientId: state.multiplayer.clientId, joinedAt: Date.now() });
-    }
-    if (status === "CHANNEL_ERROR") {
+  channel.attach((err) => {
+    if (err) {
       setRoomStatus("信令連線失敗");
       connectBtnEl.disabled = false;
+      return;
     }
+    setRoomStatus("連線中...");
+    channel.presence.enter({ joinedAt: Date.now() }, () => {
+      updateRoomPresence();
+    });
   });
 }
 
@@ -1172,7 +1177,12 @@ if (connectBtnEl) {
 
 window.addEventListener("beforeunload", () => {
   if (state.multiplayer.channel) {
-    state.multiplayer.channel.unsubscribe();
+    state.multiplayer.channel.presence.leave();
+    state.multiplayer.channel.detach();
+  }
+  if (ablyClient) {
+    ablyClient.close();
+    ablyClient = null;
   }
 });
 
