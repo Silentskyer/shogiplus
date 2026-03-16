@@ -20,14 +20,14 @@
 2. 或使用任意靜態伺服器啟動後開啟
 
 ## 連線對戰（可部署於 Vercel）
-本版本改用 Ably 作為信令服務，不需要自架 WebSocket 伺服器。
+本版本改用 Ably 作為信令服務，不需要自架 WebSocket 伺服器，並使用 Token Auth 避免前端暴露 API Key。
 
 1. 建立 Ably 專案並取得 API Key
 2. 在 Vercel 專案設定環境變數：
    - `ABLY_KEY`
 3. 部署至 Vercel 後，使用者輸入房間碼即可連線
-
-伺服器端會透過 `api/config.js` 將環境變數提供給前端使用。
+ 
+前端會呼叫 `api/ably-token.js` 取得臨時 Token。
 
 ## 操作說明
 - 點擊棋子可顯示可走位置

@@ -80,7 +80,6 @@ const roomInputEl = document.getElementById("room-code");
 const connectBtnEl = document.getElementById("connect-btn");
 const roomStatusEl = document.getElementById("room-status");
 
-let ABLY_KEY = window.ABLY_KEY || "";
 let ablyClient = null;
 
 function setRoomStatus(text) {
@@ -89,49 +88,17 @@ function setRoomStatus(text) {
   }
 }
 
-function setAblyConfig(key) {
-  ABLY_KEY = key || "";
-  ablyClient = null;
-}
-
-async function loadAblyConfig() {
-  if (ABLY_KEY) {
-    return true;
-  }
-  try {
-    const response = await fetch("/api/config", { cache: "no-store" });
-    if (!response.ok) {
-      let detail = "";
-      try {
-        const data = await response.json();
-        if (data && data.error) {
-          detail = `（${data.error}）`;
-        }
-      } catch {
-        // ignore parse errors
-      }
-      setRoomStatus(`無法讀取連線設定 ${detail}`.trim());
-      return false;
-    }
-    const data = await response.json();
-    if (data && data.ablyKey) {
-      setAblyConfig(data.ablyKey);
-      return true;
-    }
-  } catch {
-    setRoomStatus("無法連線到設定服務");
-    return false;
-  }
-  return false;
-}
-
 function getAblyClient() {
-  if (!ABLY_KEY || !window.Ably) {
+  if (!window.Ably) {
     return null;
   }
   if (!ablyClient) {
     ablyClient = new window.Ably.Realtime({
-      key: ABLY_KEY,
+      authUrl: "/api/ably-token",
+      authMethod: "POST",
+      authParams: {
+        clientId: state.multiplayer.clientId,
+      },
       clientId: state.multiplayer.clientId,
     });
   }
@@ -1152,15 +1119,15 @@ async function connectRoom() {
     setRoomStatus("請輸入房間碼");
     return;
   }
-  if (!ABLY_KEY) {
-    await loadAblyConfig();
-  }
   state.multiplayer.clientId = generateClientId();
   const ably = getAblyClient();
   if (!ably) {
-    setRoomStatus("請先設定 Ably 連線資訊");
+    setRoomStatus("Ably 載入失敗，請重新整理頁面");
     return;
   }
+  ably.connection.on("failed", () => {
+    setRoomStatus("Ably 連線失敗");
+  });
   connectBtnEl.disabled = true;
   state.multiplayer.enabled = true;
   state.multiplayer.room = code;
