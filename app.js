@@ -101,6 +101,16 @@ async function loadAblyConfig() {
   try {
     const response = await fetch("/api/config", { cache: "no-store" });
     if (!response.ok) {
+      let detail = "";
+      try {
+        const data = await response.json();
+        if (data && data.error) {
+          detail = `（${data.error}）`;
+        }
+      } catch {
+        // ignore parse errors
+      }
+      setRoomStatus(`無法讀取連線設定 ${detail}`.trim());
       return false;
     }
     const data = await response.json();
@@ -109,6 +119,7 @@ async function loadAblyConfig() {
       return true;
     }
   } catch {
+    setRoomStatus("無法連線到設定服務");
     return false;
   }
   return false;
